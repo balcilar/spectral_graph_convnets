@@ -1,3 +1,15 @@
+conda create -n gcnnpyt
+
+conda activate gcnnpyt
+conda install -c pytorch pytorch cudatoolkit=8.0
+conda install torchvision
+conda install scikit-learn
+conda install tensorflow
+
+
+
+
+
 # Graph ConvNets in PyTorch
 October 15, 2017
 <br>
