@@ -25,8 +25,8 @@ sys.path.insert(0, 'lib/')
 #get_ipython().run_line_magic('autoreload', '2')
 
 import os
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+#os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 if torch.cuda.is_available():
     print('cuda available')
@@ -70,6 +70,9 @@ from lib.coarsening import lmax_L
 from lib.coarsening import perm_data
 from lib.coarsening import rescale_L
 
+import matplotlib.pyplot as plt
+
+
 # Construct graph
 t_start = time.time()
 grid_side = 28
@@ -77,9 +80,13 @@ number_edges = 8
 metric = 'euclidean'
 A = grid_graph(grid_side,number_edges,metric) # create graph of Euclidean grid
 
+#plt.matshow(A.todense())
+#plt.show()
+
 # Compute coarsened graphs
 coarsening_levels = 4
 L, perm = coarsen(A, coarsening_levels)
+
 
 # Compute max eigenvalue of graph Laplacians
 lmax = []
