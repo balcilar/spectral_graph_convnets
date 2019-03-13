@@ -71,6 +71,7 @@ from lib.coarsening import perm_data
 from lib.coarsening import rescale_L
 
 import matplotlib.pyplot as plt
+import scipy.io as sio
 
 
 # Construct graph
@@ -82,6 +83,8 @@ A = grid_graph(grid_side,number_edges,metric) # create graph of Euclidean grid
 
 #plt.matshow(A.todense())
 #plt.show()
+# sio.savemat('np_vector.mat', {'A':A.todense()})
+# sio.savemat('x_vector.mat', {'x':x.detach().numpy()})
 
 # Compute coarsened graphs
 coarsening_levels = 4
