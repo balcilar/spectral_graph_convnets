@@ -81,7 +81,6 @@ for i=1:level
     Nnew = max(cluster_id) + 1;
     W=sparse(nrr,ncc,nvv);
     W=W-diag(diag(W));
-    W=(W+W')/2;
     
     G{i+1}=W;
         

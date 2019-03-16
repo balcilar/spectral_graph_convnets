@@ -126,6 +126,7 @@ class my_sparse_mm(torch.autograd.Function):
     def forward(self, W, x):  # W is SPARSE
         self.save_for_backward(W, x)
         y = torch.mm(W, x)
+        print(W.shape,"  ------  ",x.shape)
         return y
     
     def backward(self, grad_output):
@@ -133,6 +134,7 @@ class my_sparse_mm(torch.autograd.Function):
         grad_input = grad_output.clone()
         grad_input_dL_dW = torch.mm(grad_input, x.t()) 
         grad_input_dL_dx = torch.mm(W.t(), grad_input )
+        print(W.shape,"  eeeee  ",x.shape)
         return grad_input_dL_dW, grad_input_dL_dx
     
     

@@ -4,14 +4,17 @@ clc
 
 [imgDataTrain, labelsTrain, imgDataTest, labelsTest] = prepareData;
 
-%W=createGridGraph(28);
-A=gridgrqph(28,8);
+A=createGridGraph(28);
+%A=gridgrqph(28,8);
 level=4;
 
 [G, parents]= Coarsen(A,level);
 
 % calculate basis
 for i=1:level+1    
+%     d = sum(G{i},2);
+%     L{i} = diag(d)-G{i};
+
     D = diag(1./sqrt(sum(G{i},1)));    
     L{i}= eye(size(D,1)) - D * G{i} * D;    
     [u, v]=eig(full(L{i}));
@@ -19,8 +22,9 @@ for i=1:level+1
     lmax(i)=max(v);
     
     % normalized laplacian make max eigenvalue 1
-    %L{i}= L{i}/lmax(i) * 2 - eye(size(D,1));
-    
+    L{i}= 2*L{i}/lmax(i) - eye(size(D,1));
+    [u1, v1]=eig(full(L{i}));
+    v1=diag(v1);     
 end
 
 

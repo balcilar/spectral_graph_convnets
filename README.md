@@ -1,104 +1,90 @@
-conda create -n gcnnpyt
+# Convolutional Neural Networks on Graphs with Fast Localized Spectral Filtering
 
-conda activate gcnnpyt
+The code in this repository implements an efficient generalization of the
+popular Convolutional Neural Networks (CNNs) to arbitrary graphs, presented in
+our paper:
 
-conda install -c pytorch pytorch cudatoolkit=8.0
+Michaël Defferrard, Xavier Bresson, Pierre Vandergheynst, [Convolutional Neural
+Networks on Graphs with Fast Localized Spectral Filtering][arXiv], Neural
+Information Processing Systems (NIPS), 2016.
 
-conda install torchvision
+Additional material:
+* [NIPS2016 spotlight video][video], 2016-11-22.
+* [Deep Learning on Graphs][slides_ntds], a lecture for EPFL's master course [A
+  Network Tour of Data Science][ntds], 2016-12-21.
+* [Deep Learning on Graphs][slides_dlid], an invited talk at the [Deep Learning on
+  Irregular Domains][dlid] workshop of BMVC, 2017-09-17.
 
-conda install scikit-learn
+[video]: https://www.youtube.com/watch?v=cIA_m7vwOVQ
+[slides_ntds]: https://doi.org/10.6084/m9.figshare.4491686
+[ntds]: https://github.com/mdeff/ntds_2016
+[slides_dlid]: https://doi.org/10.6084/m9.figshare.5394805
+[dlid]: http://dlid.swansea.ac.uk
 
-conda install tensorflow
+There is also implementations of the filters used in:
+* Joan Bruna, Wojciech Zaremba, Arthur Szlam, Yann LeCun, [Spectral Networks
+  and Locally Connected Networks on Graphs][bruna], International Conference on
+  Learning Representations (ICLR), 2014.
+* Mikael Henaff, Joan Bruna and Yann LeCun, [Deep Convolutional Networks on
+  Graph-Structured Data][henaff], arXiv, 2015.
 
+[arXiv]:  https://arxiv.org/abs/1606.09375
+[bruna]:  https://arxiv.org/abs/1312.6203
+[henaff]: https://arxiv.org/abs/1506.05163
 
+## Installation
 
-
-
-
-# Graph ConvNets in PyTorch
-October 15, 2017
-<br>
-<br>
-
-
-
-<img src="pic/graph_convnet.jpg" align="right" width="200"/>
-
-
-### Xavier Bresson
-<img src="pic/home100.jpg" width="15" height="15"/> http://www.ntu.edu.sg/home/xbresson<br>
-<img src="pic/github100.jpg" width="15" height="15"/> https://github.com/xbresson<br>
-<img src="pic/twitter100.jpg" width="15" height="15"/> https://twitter.com/xbresson <br>
-<br>
-
-
-### Description
-Prototype implementation in PyTorch of the NIPS'16 paper:<br>
-Convolutional Neural Networks on Graphs with Fast Localized Spectral Filtering<br>
-M Defferrard, X Bresson, P Vandergheynst<br>
-Advances in Neural Information Processing Systems, 3844-3852, 2016<br>
-ArXiv preprint: [arXiv:1606.09375](https://arxiv.org/pdf/1606.09375.pdf) <br>
-<br>
-
-### Code objective
-The code provides a simple example of graph ConvNets for the MNIST classification task.<br>
-The graph is a 8-nearest neighbor graph of a 2D grid.<br>
-The signals on graph are the MNIST images vectorized as $28^2 \times 1$ vectors.<br>
-<br>
-
-
-### Installation
+1. Clone this repository.
    ```sh
-   git clone https://github.com/xbresson/graph_convnets_pytorch.git
-   cd graph_convnets_pytorch
-   pip install -r requirements.txt # installation for python 3.6.2
-   python check_install.py
-   jupyter notebook # run the 2 notebooks
+   git clone https://github.com/mdeff/cnn_graph
+   cd cnn_graph
    ```
 
-<br>
+2. Install the dependencies. The code should run with TensorFlow 1.0 and newer.
+   ```sh
+   pip install -r requirements.txt  # or make install
+   ```
 
+3. Play with the Jupyter notebooks.
+   ```sh
+   jupyter notebook
+   ```
 
+## Reproducing our results
 
-### Results
-GPU Quadro M4000<br>
-* Standard ConvNets: **01_standard_convnet_lenet5_mnist_pytorch.ipynb**, accuracy= 99.31, speed= 6.9 sec/epoch. <br>
-* Graph ConvNets: **02_graph_convnet_lenet5_mnist_pytorch.ipynb**, accuracy= 99.19, speed= 100.8 sec/epoch <br>
-<br>
-
-
-### Note
-PyTorch has not yet implemented function torch.mm(sparse, dense) for variables: https://github.com/pytorch/pytorch/issues/2389. It will be certainly implemented but in the meantime, I defined a new autograd function for sparse variables, called "my_sparse_mm", by subclassing torch.autograd.function and implementing the forward and backward passes.
-
-
-```python
-class my_sparse_mm(torch.autograd.Function):
-    """
-    Implementation of a new autograd function for sparse variables, 
-    called "my_sparse_mm", by subclassing torch.autograd.Function 
-    and implementing the forward and backward passes.
-    """
-    
-    def forward(self, W, x):  # W is SPARSE
-        self.save_for_backward(W, x)
-        y = torch.mm(W, x)
-        return y
-    
-    def backward(self, grad_output):
-        W, x = self.saved_tensors 
-        grad_input = grad_output.clone()
-        grad_input_dL_dW = torch.mm(grad_input, x.t()) 
-        grad_input_dL_dx = torch.mm(W.t(), grad_input )
-        return grad_input_dL_dW, grad_input_dL_dx
+Run all the notebooks to reproduce the experiments on
+[MNIST](nips2016/mnist.ipynb) and [20NEWS](nips2016/20news.ipynb) presented in
+the paper.
+```sh
+cd nips2016
+make
 ```
-<br>
 
+## Using the model
 
-### When to use this algorithm?
-Any problem that can be cast as analyzing a set of signals on a fixed graph, and you want to use ConvNets for this analysis.<br>
+To use our graph ConvNet on your data, you need:
 
-<br>
+1. a data matrix where each row is a sample and each column is a feature,
+2. a target vector,
+3. optionally, an adjacency matrix which encodes the structure as a graph.
 
-<br>
-<br>
+See the [usage notebook][usage] for a simple example with fabricated data.
+Please get in touch if you are unsure about applying the model to a different
+setting.
 
+[usage]: http://nbviewer.jupyter.org/github/mdeff/cnn_graph/blob/outputs/usage.ipynb
+
+## License & co
+
+The code in this repository is released under the terms of the [MIT license](LICENSE.txt).
+Please cite our [paper][arXiv] if you use it.
+
+```
+@inproceedings{cnn_graph,
+  title = {Convolutional Neural Networks on Graphs with Fast Localized Spectral Filtering},
+  author = {Defferrard, Micha\"el and Bresson, Xavier and Vandergheynst, Pierre},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year = {2016},
+  url = {https://arxiv.org/abs/1606.09375},
+}
+```
