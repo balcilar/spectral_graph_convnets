@@ -1,15 +1,11 @@
-#%% [markdown]
-# # Graph Convolutional Neural Networks
-# ## Graph LeNet5 with PyTorch
-# ### Xavier Bresson, Oct. 2017
-#%% [markdown]
-# Implementation of spectral graph ConvNets<br>
-# Convolutional Neural Networks on Graphs with Fast Localized Spectral Filtering<br>
-# M Defferrard, X Bresson, P Vandergheynst<br>
-# Advances in Neural Information Processing Systems, 3844-3852, 2016<br>
-# ArXiv preprint: [arXiv:1606.09375](https://arxiv.org/pdf/1606.09375.pdf) <br>
-
-#%%
+import numpy as np
+from lib.grid_graph import grid_graph
+from lib.coarsening import coarsen
+from lib.coarsening import lmax_L
+from lib.coarsening import perm_data
+from lib.coarsening import rescale_L
+from scipy import sparse
+import os
 import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
@@ -19,15 +15,7 @@ import collections
 import time
 import numpy as np
 import tensorflow as tf
-
-import sys
-sys.path.insert(0, 'lib/')
-#get_ipython().run_line_magic('load_ext', 'autoreload')
-#get_ipython().run_line_magic('autoreload', '2')
-
-import os
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+import pickle
 
 if torch.cuda.is_available():
     print('cuda available')
@@ -39,75 +27,6 @@ else:
     dtypeFloat = torch.FloatTensor
     dtypeLong = torch.LongTensor
     torch.manual_seed(1)
-    
-
-#%% [markdown]
-# # MNIST
-
-#%%
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets('datasets', one_hot=False) # load data in folder datasets/
-
-train_data = mnist.train.images.astype(np.float32)
-val_data = mnist.validation.images.astype(np.float32)
-test_data = mnist.test.images.astype(np.float32)
-train_labels = mnist.train.labels
-val_labels = mnist.validation.labels
-test_labels = mnist.test.labels
-print(train_data.shape)
-print(train_labels.shape)
-print(val_data.shape)
-print(val_labels.shape)
-print(test_data.shape)
-print(test_labels.shape)
-
-#%% [markdown]
-# # Graph
-
-#%%
-from lib.grid_graph import grid_graph
-from lib.coarsening import coarsen
-from lib.coarsening import lmax_L
-from lib.coarsening import perm_data
-from lib.coarsening import rescale_L
-
-# Construct graph
-t_start = time.time()
-grid_side = 28
-number_edges = 8
-metric = 'euclidean'
-A = grid_graph(grid_side,number_edges,metric) # create graph of Euclidean grid
-
-# Compute coarsened graphs
-coarsening_levels = 4
-L, perm = coarsen(A, coarsening_levels)
-
-# Compute max eigenvalue of graph Laplacians
-lmax = []
-for i in range(coarsening_levels):
-    lmax.append(lmax_L(L[i]))    
-    #L[i] = rescale_L(L[i], lmax[i]) 
-
-print('lmax: ' + str([lmax[i] for i in range(coarsening_levels)]))
-
-# Reindex nodes to satisfy a binary tree structure
-train_data = perm_data(train_data, perm)
-val_data = perm_data(val_data, perm)
-test_data = perm_data(test_data, perm)
-
-print(train_data.shape)
-print(val_data.shape)
-print(test_data.shape)
-
-print('Execution time: {:.2f}s'.format(time.time() - t_start))
-del perm
-
-#%% [markdown]
-# # Graph ConvNet LeNet5
-# ### Layers: CL32-MP4-CL64-MP4-FC512-FC10
-
-#%%
-# class definitions
 
 
 def bspline_basis(K, x, degree=3):
@@ -182,11 +101,13 @@ class Graph_ConvNet_LeNet5(nn.Module):
         super(Graph_ConvNet_LeNet5, self).__init__()
         
         # parameters
-        D, CL1_F, CL1_K, CL2_F, CL2_K, FC1_F, FC2_F = net_parameters
+        D, DFeat,CL1_F, CL1_K, CL2_F, CL2_K, FC1_F, FC2_F = net_parameters
         FC1Fin = CL2_F*(D//16)
         
         # graph CL1
-        self.cl1 = nn.Linear(CL1_K, CL1_F) 
+        self.cl1 = nn.Linear(CL1_K*DFeat, CL1_F) 
+        #self.cl1 = nn.Linear(CL1_K, DFeat*CL1_F)
+
         Fin = CL1_K; Fout = CL1_F;
         scale = np.sqrt( 2.0/ (Fin+Fout) )
         self.cl1.weight.data.uniform_(-scale, scale)
@@ -194,8 +115,8 @@ class Graph_ConvNet_LeNet5(nn.Module):
         self.CL1_K = CL1_K; self.CL1_F = CL1_F; 
         
         # graph CL2
-        #self.cl2 = nn.Linear(CL2_K*CL1_F, CL2_F) 
-        self.cl2 = nn.Linear(CL2_K, CL1_F*CL2_F) 
+        self.cl2 = nn.Linear(CL2_K*CL1_F, CL2_F) 
+        #self.cl2 = nn.Linear(CL2_K, CL1_F*CL2_F) 
 
         Fin = CL2_K*CL1_F; Fout = CL2_F;
         scale = np.sqrt( 2.0/ (Fin+Fout) )
@@ -245,7 +166,7 @@ class Graph_ConvNet_LeNet5(nn.Module):
         x = x.view([M, Fin*N])
 
         #x = tf.matmul(U, x)  # M x Fin*N
-        x=torch.mm(torch.from_numpy(U).cuda(), x)
+        x=torch.mm(torch.from_numpy(U).float().cuda(), x)
 
         #x = tf.reshape(x, [M, Fin, N])  # M x Fin x N
         x = x.view([M, Fin, N])
@@ -256,7 +177,7 @@ class Graph_ConvNet_LeNet5(nn.Module):
         x = x.permute(2,1,0).contiguous()  # N x Fout x M
         x = x.view([N*Fout, M])  # N*Fout x M
         # Transform back to graph domain
-        x = torch.mm(x, torch.from_numpy(U).cuda())  # N*Fout x M
+        x = torch.mm(x, torch.from_numpy(U).float().cuda())  # N*Fout x M
         x = x.view( [N, Fout, M])  # N x Fout x M
         return x.permute(0,2,1).contiguous()  # N x M x Fout
 
@@ -298,7 +219,7 @@ class Graph_ConvNet_LeNet5(nn.Module):
         xxx= self.filter_in_fourier(x, L, Fout, K, U, xx)
         return xxx
 
-    def graph_conv_cheby2(self, x, cl, L, lmax, Fout, K):
+    def graph_conv_cheby(self, x, cl, L, lmax, Fout, K):
 
         # parameters
         # B = batch size
@@ -309,8 +230,8 @@ class Graph_ConvNet_LeNet5(nn.Module):
         B, V, Fin = x.size(); B, V, Fin = int(B), int(V), int(Fin) 
 
         # rescale Laplacian
-        lmax = lmax_L(L)
-        L = rescale_L(L, lmax) 
+        #lmax = lmax_L(L)
+        #L = rescale_L(L, lmax) 
         
         # convert scipy sparse matric L to pytorch
         L = L.tocoo()
@@ -353,76 +274,7 @@ class Graph_ConvNet_LeNet5(nn.Module):
         
         return x
 
-    def graph_conv_cheby(self, X, cl, L, lmax, Fout, K):
-
-        # parameters
-        # B = batch size
-        # V = nb vertices
-        # Fin = nb input features
-        # Fout = nb output features
-        # K = Chebyshev order & support size
-        BB, V, Fin = X.size(); 
-        
-        BB, V, Fin = int(BB), int(V), int(Fin) 
-
-        # rescale Laplacian
-
-        # lmax = lmax_L(L)
-        # L = rescale_L(L, lmax) 
-        
-        # convert scipy sparse matric L to pytorch
-        L = L.tocoo()
-        indices = np.column_stack((L.row, L.col)).T 
-        indices = indices.astype(np.int64)
-        indices = torch.from_numpy(indices)
-        indices = indices.type(torch.LongTensor)
-        L_data = L.data.astype(np.float32)
-        L_data = torch.from_numpy(L_data) 
-        L_data = L_data.type(torch.FloatTensor)
-        L = torch.sparse.FloatTensor(indices, L_data, torch.Size(L.shape))
-        L = Variable( L , requires_grad=False)
-        if torch.cuda.is_available():
-            L = L.cuda()
-
-        for i in range(BB):
-            x=X[i,:,:]
-            x=x.unsqueeze(0)
-            B=1
-            # transform to Chebyshev basis
-            x0 = x.permute(1,2,0).contiguous()  # V x Fin x B
-            x0 = x0.view([V, Fin*B])            # V x Fin*B
-            x = x0.unsqueeze(0)                 # 1 x V x Fin*B
             
-            def concat(x, x_):
-                x_ = x_.unsqueeze(0)            # 1 x V x Fin*B
-                return torch.cat((x, x_), 0)    # K x V x Fin*B  
-                
-            if K > 1: 
-                #x1 = my_sparse_mm()(L,x0)              # V x Fin*B
-                x1=torch.mm(L,x0)
-                x = torch.cat((x, x1.unsqueeze(0)),0)  # 2 x V x Fin*B
-            for k in range(2, K):
-                #x2 = 2 * my_sparse_mm()(L,x1) - x0  
-                x2 = 2 * torch.mm(L,x1) - x0
-                x = torch.cat((x, x2.unsqueeze(0)),0)  # M x Fin*B
-                x0, x1 = x1, x2  
-            if i==0:
-                Y=x.unsqueeze(-1)
-            else:
-                Y = torch.cat((Y, x.unsqueeze(-1)),0-1)
-        
-        #x = x.view([K, V, Fin, BB])           # K x V x Fin x B    
-        x=Y 
-        x = x.permute(3,1,2,0).contiguous()  # B x V x Fin x K       
-        x = x.view([BB*V, Fin*K])             # B*V x Fin*K
-        
-        # Compose linearly Fin features to get Fout features
-        x = cl(x)                            # B*V x Fout  
-        x = x.view([BB, V, Fout])             # B x V x Fout
-        
-        return x
-        
-        
     # Max pooling of size p. Must be a power of 2.
     def graph_max_pool(self, x, p): 
         if p > 1: 
@@ -437,27 +289,28 @@ class Graph_ConvNet_LeNet5(nn.Module):
     def forward(self, x, d, L, lmax):
         
         # graph CL1
-        x = x.unsqueeze(2) # B x V x Fin=1  
-        #x = self.graph_conv_cheby(x, self.cl1, L[0], lmax[0], self.CL1_F, self.CL1_K)
-        x = self.spline(x, self.cl1, L[0], lmax[0], self.CL1_F, self.CL1_K)
+        #x = x.unsqueeze(2) # B x V x Fin=1  
+        x = self.graph_conv_cheby(x, self.cl1, L[0], lmax[0], self.CL1_F, self.CL1_K)
+        #x = self.spline(x, self.cl1, L[0], lmax[0], self.CL1_F, self.CL1_K)
         x = F.relu(x)
         x = self.graph_max_pool(x, 4)
         
         # graph CL2
-        #x = self.graph_conv_cheby(x, self.cl2, L[2], lmax[2], self.CL2_F, self.CL2_K)
-        x = self.spline(x, self.cl2, L[2], lmax[2], self.CL2_F, self.CL2_K)
+        x = self.graph_conv_cheby(x, self.cl2, L[2], lmax[2], self.CL2_F, self.CL2_K)
+        #x = self.spline(x, self.cl2, L[2], lmax[2], self.CL2_F, self.CL2_K)
         x = F.relu(x)
         x = self.graph_max_pool(x, 4)
         
         # FC1
         x = x.view(-1, self.FC1Fin)
+        #x = x.view(-1, x.shape[0]*x.shape[1]*x.shape[2])
         x = self.fc1(x)
         x = F.relu(x)
         x  = nn.Dropout(d)(x)
         
         # FC2
         x = self.fc2(x)
-            
+        #x=self.fc2(torch.sum(x,0))   
         return x
         
         
@@ -497,25 +350,135 @@ class Graph_ConvNet_LeNet5(nn.Module):
     
 
 
-#%%
-# Delete existing network if exists
-try:
-    del net
-    print('Delete existing network\n')
-except NameError:
-    print('No existing network to delete\n')
+def readpah(dirname='datasets/PAH',ftype='train',mxnode=30):
+
+    FF=[];GG=[];YY=[]
+
+    for i in range(0,10):
+        f=open(dirname+'/'+ftype+'set_'+str(i)+'.ds')
+        line = f.readline()
+        cnt = 0
+        F=[];G=[];Y=[]
+        while line:
+            z=line.split()
+            g=open(dirname+'/'+z[0] )
+            tmp = g.readline()
+            tmp = g.readline().split()
+            nnode=int(tmp[0])
+            nedge=int(tmp[1])
+            X=np.zeros((nnode,2))
+            A=np.zeros((nnode,nnode))
+            # X=np.zeros((mxnode,2))
+            # A=0.000*np.eye(mxnode)
+            for j in range(nnode):
+                tmp = g.readline().split()
+                X[j,0]=float(tmp[0])
+                X[j,1]=float(tmp[1])
+            for j in range(nedge):
+                tmp = g.readline().split()
+                i1=int(tmp[0])-1
+                j1=int(tmp[1])-1
+                p1=int(tmp[2])
+                p2=int(tmp[3])
+                A[i1,j1]=p1
+                A[j1,i1]=p2
+            g.close()
+            F.append(X)
+            G.append(A)
+            Y.append(int(z[1]))
+            cnt+=1
+            line = f.readline()
+
+        FF.append(F)
+        GG.append(G)
+        YY.append(Y)
+    return FF,GG,YY
+
+if os.path.exists('pahdata.p'):
+    f=open( "pahdata.p", "rb" )
+    trainX=pickle.load(f)
+    trainG=pickle.load(f)
+    trainY=pickle.load(f)
+    testX=pickle.load(f)
+    testG=pickle.load(f)
+    testY=pickle.load(f)
+    f.close() 
+else:
+
+    trainX,trainG,trainY=readpah(dirname='datasets/PAH',ftype='train')
+    testX,testG,testY=readpah(dirname='datasets/PAH',ftype='test')
+    coarsening_levels = 4
+    for i in range(0,len(trainX)):
+        print(i)
+        for j in range(0,len(trainX[i])):
+            trainG[i][j], perm = coarsen(sparse.csr_matrix(trainG[i][j]), coarsening_levels)
+            trainX[i][j] = perm_data(trainX[i][j].T, perm).T
+    for i in range(0,len(testX)):
+        for j in range(0,len(testX[i])):
+            testG[i][j], perm = coarsen(sparse.csr_matrix(testG[i][j]), coarsening_levels)
+            testX[i][j] = perm_data(testX[i][j].T, perm).T
+
+    f=open( "pahdata.p", "wb" )
+    pickle.dump(trainX,f)
+    pickle.dump(trainG,f)
+    pickle.dump(trainY,f)
+    pickle.dump(testX,f)
+    pickle.dump(testG,f)
+    pickle.dump(testY,f)
+    f.close()
+
+
+kfold=0
+
+train_data=np.zeros((0,32,2))
+train_labels=np.zeros((0),dtype=np.int)
+train_lap=[]
+for i in range(len(trainX[kfold])):
+    if trainX[kfold][i].shape[0]==32:
+        train_data=np.vstack((train_data,np.expand_dims(trainX[kfold][i],0)))
+        train_labels=np.hstack((train_labels,np.expand_dims(trainY[kfold][i],0)))
+        train_lap.append(trainG[kfold][i])
+
+test_data=np.zeros((0,32,2))
+test_labels=np.zeros((0))
+test_lap=[]
+for i in range(len(testX[kfold])):
+    if testX[kfold][i].shape[0]==32:
+        test_data=np.vstack((test_data,np.expand_dims(testX[kfold][i],0)))
+        test_labels=np.hstack((test_labels,np.expand_dims(testY[kfold][i],0)))
+        test_lap.append(testG[kfold][i])
+
+krr=np.sum(train_labels==1)==np.sum(train_labels==-1)
+
+while not krr:
+    for i in range(len(trainX[kfold])):
+        if trainX[kfold][i].shape[0]==32 and trainY[kfold][i]==-1:
+            train_data=np.vstack((train_data,np.expand_dims(trainX[kfold][i],0)))
+            train_labels=np.hstack((train_labels,np.expand_dims(trainY[kfold][i],0)))
+            train_lap.append(trainG[kfold][i])
+            krr=np.sum(train_labels==1)==np.sum(train_labels==-1)
+            if krr:
+                break
+        if krr:
+            break
+
+#train_labels
+train_labels= (train_labels+1)/2
+test_labels= (test_labels+1)/2
+
 
 
 
 # network parameters
 D = train_data.shape[1]
-CL1_F = 32
+DFeat=train_data.shape[2]
+CL1_F = 8
 CL1_K = 25
-CL2_F = 64
+CL2_F = 16
 CL2_K = 25
-FC1_F = 512
-FC2_F = 10
-net_parameters = [D, CL1_F, CL1_K, CL2_F, CL2_K, FC1_F, FC2_F]
+FC1_F = 8
+FC2_F = 2
+net_parameters = [D,DFeat, CL1_F, CL1_K, CL2_F, CL2_K, FC1_F, FC2_F]
 
 
 # instantiate the object net of the class 
@@ -532,8 +495,8 @@ L_net = list(net.parameters())
 # learning parameters
 learning_rate = 0.05
 dropout_value = 0.5
-l2_regularization = 5e-4 
-batch_size = 100
+l2_regularization = 5e-3 
+batch_size = 1
 num_epochs = 20
 train_size = train_data.shape[0]
 nb_iter = int(num_epochs * train_size) // batch_size
@@ -574,7 +537,8 @@ for epoch in range(num_epochs):  # loop over the dataset multiple times
         train_y = Variable( train_y , requires_grad=False) 
             
         # Forward 
-        y = net.forward(train_x, dropout_value, L, lmax)
+        y = net.forward(train_x, dropout_value, train_lap[batch_idx[0]],[1,1,1,1])  #
+        #print(y)
         loss = net.loss(y,train_y,l2_regularization) 
         #loss_train = loss.data[0]
         loss_train = loss.item()
@@ -621,7 +585,7 @@ for epoch in range(num_epochs):  # loop over the dataset multiple times
         batch_idx_test = [indices_test.popleft() for i in range(batch_size)]
         test_x, test_y = test_data[batch_idx_test,:], test_labels[batch_idx_test]
         test_x = Variable( torch.FloatTensor(test_x).type(dtypeFloat) , requires_grad=False) 
-        y = net.forward(test_x, 0.0, L, lmax) 
+        y = net.forward(test_x, 0.0, test_lap[batch_idx_test[0]], [1,1,1,1]) 
         test_y = test_y.astype(np.int64)
         test_y = torch.LongTensor(test_y).type(dtypeLong)
         test_y = Variable( test_y , requires_grad=False) 
@@ -632,4 +596,4 @@ for epoch in range(num_epochs):  # loop over the dataset multiple times
     print('  accuracy(test) = %.3f %%, time= %.3f' % (running_accuray_test / running_total_test, t_stop_test))  
     
 
-
+        
